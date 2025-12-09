@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>湖南第一师范学院-室内外一体化导航</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body,html{width:100%;height:100%;overflow:hidden;font-family:"Microsoft YaHei",sans-serif}
+        #container{width:100%;height:100%}
+        #indoorContainer{display:none;width:100%;height:100%;background:#f5f5f5;position:relative}
+        #indoorMap{width:100%;height:100%;overflow:auto;position:relative;background:#e8e8e8}
+        #mapCanvas{max-width:100%;max-height:80%;margin:0 auto;display:block}
+        .control-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:90%;max-width:500px;background:#fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:15px;z-index:100}
+        .input-group{display:flex;flex-direction:column;gap:10px;margin-bottom:15px}
+        .input-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #eee;border-radius:8px}
+        .input-item input{border:none;outline:none;flex:1;font-size:14px;padding:5px 0}
+        .btn-plan{width:100%;background:#00b42a;color:#fff;border:none;border-radius:8px;padding:12px 0;font-size:16px;font-weight:bold;cursor:pointer}
+        .status-tip{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:20px;font-size:14px;white-space:nowrap}
+        .back-btn{position:fixed;top:20px;left:20px;padding:8px 16px;background:#fff;border:none;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:pointer;z-index:101;display:none}
+    </style>
+</head>
+<body>
+    <!-- 室外地图容器 -->
+    <div id="container"></div>
+
+    <!-- 室内地图容器 -->
+    <div id="indoorContainer">
+        <div id="indoorMap"></div>
+    </div>
+
+    <!-- 室外控制面板 -->
+    <div class="control-panel">
+        <div class="input-group">
+            <div class="input-item">
+                <input type="text" id="start" value="我的位置" readonly>
+            </div>
+            <div class="input-item">
+                <input type="text" id="end" placeholder="目的地（如：立园楼）">
+            </div>
+        </div>
+        <button class="btn-plan" id="planBtn">规划路线</button>
+    </div>
+
+    <!-- 室内控制面板 -->
+    <div class="indoor-controls" style="display: none;">
+        <div class="location-info">当前位置：<span id="currentIndoorLocation">加载中...</span></div>
+        <div class="input-item">
+            <input type="text" id="indoorEnd" placeholder="室内目的地（如：101教室）">
+        </div>
+        <button class="btn-plan" id="indoorPlanBtn">规划室内路线</button>
+    </div>
+
+    <!-- 功能按钮 -->
+    <button class="back-btn" id="backBtn">返回室外地图</button>
+
+    <div class="status-tip" id="tip">加载中...</div>
+
+    <!-- 1. 高德 JS API：室外地图 -->
+    <script src="https://webapi.amap.com/maps?v=2.0&key=f5fd151dc4da685a480f199f7c9ac58b&plugin=AMap.Geocoder,AMap.Walking,AMap.ToolBar,AMap.Scale"></script>
+
+    <!-- 2. 主脚本 -->
+    <script>
+        const BACKEND_URL = '.';                     // 相对路径，本地/上线通用
+        let map, geolocation, currentPos, userMarker;
+        let isIndoor = false;
+        let hasJumped = false;                       // 防止重复跳转
+
+        /* ===== 室外地图初始化 ===== */
+        function initOutdoor() {
+            map = new AMap.Map('container', {
+                resizeEnable: true,
+                zoom: 16,
+                center: [112.94387, 28.18944]         // 学校中心
+            });
+            AMap.plugin(['AMap.ToolBar', 'AMap.Scale', 'AMap.Geolocation'], function () {
+                map.addControl(new AMap.ToolBar({position: 'RB'}));
+                map.addControl(new AMap.Scale({position: 'RB'}));
+                geolocation = new AMap.Geolocation({
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    buttonPosition: 'LB',
+                    panToLocation: true,
+                    showCircle: true
+                });
+                map.addControl(geolocation);
+                geolocation.getCurrentPosition();
+            });
+
+            // 楼门口坐标（你实测的 lng/lat）
+            const doorPoints = [
+                {lng: 112.870885, lat: 28.194957, name: "立园楼正门", building: "立园楼"},
+                {lng: 112.870914, lat: 28.194905, name: "立园楼后门", building: "立园楼"},
+                {lng: 112.870775, lat: 28.194893, name: "立园楼南门", building: "立园楼"},
+                {lng: 112.870987, lat: 28.194961, name: "立园楼北门", building: "立园楼"}
+            ];
+            const threshold = 5;                                      // 5 米阈值
+
+            // 门口标记
+            doorPoints.forEach(door => {
+                const marker = new AMap.Marker({
+                    position: [door.lng, door.lat],
+                    title: door.name,
+                    icon: new AMap.Icon({
+                        size: new AMap.Size(40, 40),
+                        image: "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-red.png",
+                        imageSize: new AMap.Size(40, 40)
+                    })
+                });
+                map.add(marker);
+            });
+
+            // 定位成功回调
+            geolocation.on('complete', function (data) {
+                currentPos = data.position;
+                document.querySelector('#start').value = '我的位置';
+                document.querySelector('#tip').textContent = '定位成功，可以规划路线';
+                checkDoorProximity(data.position, doorPoints, threshold);
+            });
+            geolocation.on('error', function (data) {
+                document.querySelector('#tip').textContent = '定位失败，请检查权限';
+            });
+
+            // 规划按钮
+            document.querySelector('#planBtn').addEventListener('click', planOutdoorRoute);
+
+            /* 每 3 秒检查一次是否到门口 */
+            setInterval(() => {
+                if (!hasJumped && !isIndoor && geolocation) geolocation.getCurrentPosition();
+            }, 3000);
+        }
+
+        /* ===== 5 米围栏：自动进室内 ===== */
+        function checkDoorProximity(position, doorPoints, threshold) {
+            if (hasJumped || isIndoor) return;
+            const userLng = position.lng;
+            const userLat = position.lat;
+            if (userMarker) {
+                userMarker.setPosition([userLng, userLat]);
+            } else {
+                userMarker = new AMap.Marker({
+                    position: [userLng, userLat],
+                    title: "你的位置",
+                    icon: new AMap.Icon({
+                        size: new AMap.Size(30, 30),
+                        image: "https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-blue.png",
+                        imageSize: new AMap.Size(30, 30)
+                    })
+                });
+                map.add(userMarker);
+            }
+
+            let closest = null, minDist = Infinity;
+            doorPoints.forEach(door => {
+                const d = AMap.GeometryUtil.distance([userLng, userLat], [door.lng, door.lat]);
+                if (d < minDist) { minDist = d; closest = door; }
+            });
+            if (closest && minDist <= threshold) {
+                hasJumped = true;
+                switchToIndoor(closest.building);
+            }
+        }
+
+        /* ===== 室外路线规划 ===== */
+        function planOutdoorRoute() {
+            const endName = document.querySelector('#end').value.trim();
+            if (!endName) { alert('请输入目的地'); return; }
+            if (!currentPos) { alert('正在定位，请稍候'); return; }
+            document.querySelector('#tip').textContent = `正在搜索 "${endName}"...`;
+
+            AMap.plugin('AMap.Geocoder', function () {
+                const geocoder = new AMap.Geocoder({ city: '长沙市' });
+                geocoder.getLocation(endName + ', 湖南第一师范学院', function (status, result) {
+                    if (status === 'complete' && result.geocodes.length) {
+                        drawWalkLine(currentPos, result.geocodes[0].location, endName);
+                    } else {
+                        geocoder.getLocation(endName, function (st, res) {
+                            if (st === 'complete' && res.geocodes.length) {
+                                drawWalkLine(currentPos, res.geocodes[0].location, endName);
+                            } else {
+                                document.querySelector('#tip').textContent = `未找到 "${endName}" 的位置`;
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        function drawWalkLine(start, end, name) {
+            AMap.plugin('AMap.Walking', function () {
+                const walk = new AMap.Walking({
+                    map: map,
+                    panel: 'tip',
+                    autoFitView: true,
+                    hideMarkers: false
+                });
+                walk.search([start.lng, start.lat], [end.lng, end.lat], function (status, result) {
+                    if (status === 'complete') {
+                        document.querySelector('#tip').textContent = `已规划到 ${name} 的步行路线`;
+                    } else {
+                        document.querySelector('#tip').textContent = '步行路线规划失败';
+                    }
+                });
+            });
+        }
+
+        /* ===== 切换到室内 ===== */
+        function switchToIndoor(building) {
+            isIndoor = true;
+            hasJumped = true;
+            document.getElementById('container').style.display = 'none';
+            document.getElementById('indoorContainer').style.display = 'block';
+            document.querySelector('.control-panel').style.display = 'none';
+            document.querySelector('.indoor-controls').style.display = 'block';
+            document.querySelector('#tip').textContent = `已进入 ${building} 室内地图`;
+            loadIndoorMap(building);
+        }
+
+        window.switchToOutdoor = function () {
+            isIndoor = false;
+            hasJumped = false;
+            document.getElementById('container').style.display = 'block';
+            document.getElementById('indoorContainer').style.display = 'none';
+            document.querySelector('.control-panel').style.display = 'block';
+            document.querySelector('.indoor-controls').style.display = 'none';
+            document.querySelector('#tip').textContent = '已切换至室外地图';
+            map.setZoom(16);
+        };
+
+        /* ===== 室内地图：调用后端 CAD 路径 ===== */
+        function loadIndoorMap(building) {
+            const indoorMap = document.getElementById('indoorMap');
+            indoorMap.innerHTML = '<div class="loading"><p>加载室内地图...</p></div>';
+            fetch(`${BACKEND_URL}/api/generate_map`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ floor: building, start_id: '1', end_id: '10' })
+            })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.image) {
+                        indoorMap.innerHTML = `<img src="data:image/png;base64,${d.image}" style="max-width:100%;max-height:80%;display:block;margin:0 auto;">`;
+                        document.querySelector('#currentIndoorLocation').textContent = `楼层：${building}  路径长度：${(d.stats.path_found ? d.stats.total_rooms : 0)} 节点`;
+                    } else {
+                        indoorMap.innerHTML = '<p>室内图生成失败</p>';
+                    }
+                })
+                .catch(e => {
+                    indoorMap.innerHTML = '<p>网络错误</p>';
+                    console.error(e);
+                });
+        }
+
+        /* ===== 页面入口 ===== */
+        window.initMap();
+        document.getElementById('backBtn').addEventListener('click', switchToOutdoor);
+    </script>
+</body>
+</html>

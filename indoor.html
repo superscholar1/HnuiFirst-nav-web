@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAD路径规划系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.8;
+        }
+        
+        .controls {
+            padding: 20px;
+            background-color: #ecf0f1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        select, input, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .map-container {
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .map-image {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .stats {
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #ddd;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .stat-card {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        
+        .stat-card h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 50px;
+        }
+        
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            color: #e74c3c;
+            padding: 15px;
+            background-color: #fee;
+            border-radius: 5px;
+            margin: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>CAD路径规划系统</h1>
+            <p>智能楼层导航与路径规划解决方案</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="floor-select">选择楼层</label>
+                <select id="floor-select">
+                    <option value="">加载中...</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="start-point">起点（测量点/WiFi点）</label>
+                <select id="start-point">
+                    <option value="">请先选择楼层</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="end-point">终点（测量点/WiFi点）</label>
+                <select id="end-point">
+                    <option value="">请先选择楼层</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="target-point">目标点（可选）</label>
+                <select id="target-point">
+                    <option value="">无</option>
+                </select>
+            </div>
+            
+            <div class="control-group" style="min-width: 150px;">
+                <label>&nbsp;</label>
+                <button id="generate-btn">生成路径</button>
+            </div>
+        </div>
+        
+        <div class="error" id="error-message"></div>
+        
+        <div class="loading" id="loading-indicator">
+            <div class="loading-spinner"></div>
+            <p>正在生成地图和路径...</p>
+        </div>
+        
+        <div class="map-container" id="map-container" style="display: none;">
+            <img src="" alt="楼层平面图" class="map-image" id="map-image">
+        </div>
+        
+        <div class="stats" id="stats-container" style="display: none;">
+            <h2>统计信息</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>总房间数</h3>
+                    <div class="stat-value" id="total-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>数字房间</h3>
+                    <div class="stat-value" id="number-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>走廊数量</h3>
+                    <div class="stat-value" id="corridor-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>电梯数量</h3>
+                    <div class="stat-value" id="elevator-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>楼梯数量</h3>
+                    <div class="stat-value" id="stair-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>WiFi指纹点</h3>
+                    <div class="stat-value" id="wifi-points">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>路径状态</h3>
+                    <div class="stat-value" id="path-status">未规划</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let floorsData = [];
+        
+        // DOM加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFloors();
+            
+            // 楼层选择变化
+            document.getElementById('floor-select').addEventListener('change', function() {
+                updatePointSelectors();
+            });
+            
+            // 生成按钮点击
+            document.getElementById('generate-btn').addEventListener('click', generateMap);
+        });
+        
+        // 加载楼层数据
+        function loadFloors() {
+            fetch('/api/get_floors')
+                .then(response => response.json())
+                .then(data => {
+                    floorsData = data.floors;
+                    const floorSelect = document.getElementById('floor-select');
+                    
+                    // 清空并添加选项
+                    floorSelect.innerHTML = '';
+                    if (floorsData.length === 0) {
+                        floorSelect.innerHTML = '<option value="">无楼层数据</option>';
+                        return;
+                    }
+                    
+                    floorsData.forEach(floor => {
+                        const option = document.createElement('option');
+                        option.value = floor.name;
+                        option.textContent = floor.name;
+                        floorSelect.appendChild(option);
+                    });
+                    
+                    // 默认选择第一个楼层
+                    if (floorsData.length > 0) {
+                        floorSelect.value = floorsData[0].name;
+                        updatePointSelectors();
+                    }
+                })
+                .catch(error => {
+                    showError('加载楼层数据失败: ' + error.message);
+                });
+        }
+        
+        // 更新测量点选择器
+        function updatePointSelectors() {
+            const selectedFloor = document.getElementById('floor-select').value;
+            const floor = floorsData.find(f => f.name === selectedFloor);
+            
+            const startSelect = document.getElementById('start-point');
+            const endSelect = document.getElementById('end-point');
+            const targetSelect = document.getElementById('target-point');
+            
+            // 清空
+            startSelect.innerHTML = '<option value="">选择起点</option>';
+            endSelect.innerHTML = '<option value="">选择终点</option>';
+            targetSelect.innerHTML = '<option value="">无</option>';
+            
+            if (!floor) return;
+            
+            // 添加测量点和WiFi点选项
+            floor.measure_points.forEach(point => {
+                const startOption = document.createElement('option');
+                startOption.value = point;
+                startOption.textContent = `${point}`;
+                startSelect.appendChild(startOption);
+                
+                const endOption = document.createElement('option');
+                endOption.value = point;
+                endOption.textContent = `${point}`;
+                endSelect.appendChild(endOption);
+                
+                const targetOption = document.createElement('option');
+                targetOption.value = point;
+                targetOption.textContent = `${point}`;
+                targetSelect.appendChild(targetOption);
+            });
+        }
+        
+        // 生成地图和路径
+        function generateMap() {
+            const floor = document.getElementById('floor-select').value;
+            const startId = document.getElementById('start-point').value;
+            const endId = document.getElementById('end-point').value;
+            const targetId = document.getElementById('target-point').value;
+            
+            // 验证输入
+            if (!floor) {
+                showError('请选择楼层');
+                return;
+            }
+            
+            // 显示加载状态
+            showLoading(true);
+            hideError();
+            
+            // 发送请求
+            fetch('/api/generate_map', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    floor: floor,
+                    start_id: startId || null,
+                    end_id: endId || null,
+                    target_id: targetId || null
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('服务器响应错误');
+                }
+                return response.json();
+            })
+            .then(data => {
+                showLoading(false);
+                
+                // 显示地图
+                const mapContainer = document.getElementById('map-container');
+                const mapImage = document.getElementById('map-image');
+                mapImage.src = 'data:image/png;base64,' + data.image;
+                mapContainer.style.display = 'block';
+                
+                // 更新统计信息
+                updateStats(data.stats);
+                
+                // 显示统计容器
+                document.getElementById('stats-container').style.display = 'block';
+            })
+            .catch(error => {
+                showLoading(false);
+                showError('生成失败: ' + error.message);
+            });
+        }
+        
+        // 更新统计信息
+        function updateStats(stats) {
+            document.getElementById('total-rooms').textContent = stats.total_rooms;
+            document.getElementById('number-rooms').textContent = stats.room_counts.numbers || 0;
+            document.getElementById('corridor-rooms').textContent = stats.room_counts.corridor || 0;
+            document.getElementById('elevator-rooms').textContent = stats.room_counts.elevator || 0;
+            document.getElementById('stair-rooms').textContent = stats.room_counts.stair || 0;
+            document.getElementById('wifi-points').textContent = stats.wifi_points_count || 0;
+            
+            const pathStatus = document.getElementById('path-status');
+            if (stats.path_found !== undefined) {
+                pathStatus.textContent = stats.path_found ? '规划成功(最短路径)' : '规划失败';
+                pathStatus.style.color = stats.path_found ? '#27ae60' : '#e74c3c';
+            } else {
+                pathStatus.textContent = '未规划';
+                pathStatus.style.color = '#3498db';
+            }
+        }
+        
+        // 显示/隐藏加载状态
+        function showLoading(show) {
+            const loading = document.getElementById('loading-indicator');
+            const mapContainer = document.getElementById('map-container');
+            const statsContainer = document.getElementById('stats-container');
+            
+            if (show) {
+                loading.style.display = 'block';
+                mapContainer.style.display = 'none';
+                statsContainer.style.display = 'none';
+            } else {
+                loading.style.display = 'none';
+            }
+        }
+        
+        // 显示错误信息
+        function showError(message) {
+            const errorElement = document.getElementById('error-message');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+        
+        // 隐藏错误信息
+        function hideError() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
